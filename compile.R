@@ -14,7 +14,7 @@ for (i in 1:length(transcripts)) {
         dta <- data.frame(t(matrix(unlist(transcripts[[i]]))), stringsAsFactors = F)
         colnames(dta) <- names(transcripts[[i]])
         per <- regexpr("[[:punct:]]", dta$question[1])[1]
-        dta$number <- substr(dta$question[1], start = 1, stop = per - 1)
+        dta$number <- substr(dta$question[1], start = 1, stop = per - 1) %>% as.numeric()
         dta$question <- substr(dta$question[1], start = per + 1, stop = nchar(dta$question[1]))
         if (i == 15) {
             dta$hickenlooper <- ""
