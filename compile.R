@@ -1,4 +1,5 @@
 #### transcript cleaner
+#### the code isn't pretty, but it works and it's not a lot of data so it's fine
 
 setwd("YOUR DIRECTORY HERE")
 library(myUtils) # devtools::install_github('mattgarber4/myUtils')
