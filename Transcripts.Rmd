@@ -1,0 +1,346 @@
+---
+title: "New York Times Candidate Interviews - Scraping Transcripts"
+author: "Matt Garber"
+date: "October 26, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+In June 2019, the New York Times interviewed 18 Democratic presidential candidates and asked them the same set of 21 questions. The project was a major opportunity for those interested in the 2020 primary process to learn about the candidates in a controlled manor.
+
+Even more lucrative was the possibility for rigorous, quantitative analysis of the state of the primary race. Where else would such a large group of candidates be asked identical questions and have the opportunity to deliver unfiltered, unedited responses to the American people?
+
+I was excited by this. The problem, however, was that the Times, for whatever reason, did not choose to transcribe the candidate responses. Rather, it chose to post videos -- hours and hours of them.
+
+Rather than going through the painstaking task of transcribing the responses myself, I instead chose to find a technical solution. While no transcripts were posted online, the videos had captions that could be turned on and off by a button on the interface. This means that the captions could not have been part of the actual video files. Rather, they were displayed independently on the webpage. I decided to scrape them. 
+
+The code below shows the process I used to pull this data. First, I load two standard web scraping packages as well as my personal utilities package. Note that the functions to launch a remote browser in ```myUtils``` are written specifically for my computer and web scraping setup. You'll probably have to write your own function to open a Selenium remote browser. 
+
+```{r}
+library(RSelenium)
+library(rvest)
+library(myUtils) # devtools::install_github('mattgarber4/myUtils')
+
+# make sure to set a working directory
+
+```
+
+Here are the main functions written to pull these transcripts:
+
+```getLinks``` finds all the links for the individual question pages after navigating to the front page of the project on the Times site.
+```{r}
+getLinks <- function(url) {
+    remDr$navigate(url)
+    el <- remDr$findElement(using = "css selector", "div.g-questions-list")
+    qs <- el$getElementAttribute("innerHTML")[[1]] %>% read_html()
+    html_nodes(qs, "a") %>% html_attr("href") %>% trimws()
+}
+```
+
+Given the html, extract the candidate names.
+``` {r}
+extractCands <- function(page.html) {
+    # find all candidate names
+    html_nodes(page.html, css = "h3.g-candidate-name") %>% 
+        # pull text
+        html_text() %>% 
+        # format
+        trimws()
+}
+```
+
+Given the html, extract the text of the question.
+``` {r}
+constructQuestion <- function(page.html) {
+    # find question
+    question <- html_nodes(page.html, css = "div.g-top-wrap div.g-question")
+    question.txt <- html_text(question[[1]])
+    
+    # format
+    question.txt <- gsub("\n|Next Question", "", question.txt) %>% 
+        trimws()
+    
+    # remove excess white space
+    return(collapseWS(question.txt))
+    
+}
+```
+
+These two functions, refactored using the third function, find the web elements for all the videos on the page, and returns the current html.
+
+``` {r}
+# returns the web elements for the videos as a list
+findVideoElements <- function() {
+    remDr$findElements(using = "css selector", "div.g-person")
+}
+
+# find a single video
+findVideoHTML <- function(vid) {
+    vid$getElementAttribute("innerHTML")[[1]] %>% read_html()
+}
+
+
+# find videos
+findVideosHTML <- function(vids) {
+    # get video html
+    lapply(vids, findVideoHTML)
+}
+```
+
+The functions below return all the captions in the html provided.
+``` {r}
+# pull caption from this video
+extractCaption <- function(video.html) {
+    # extract the name of the candidate
+    cand <- html_nodes(video.html, css = "a")[1] %>% html_attr("class")
+    # pull captions
+    txt <- html_nodes(video.html, css = "div.g-captions") %>% html_text()
+    # if not displayed by current javascript
+    if (length(txt) != 1) {
+        txt <- ""
+    } 
+    
+    # return
+    names(txt) <- cand
+    txt
+}
+
+# pull captions from all given videos
+extractAllCaptions <- function(vids.html) {
+    # pull all captions
+    lapply(vids.html, extractCaption)
+}
+```
+
+
+And the following function refactors the steps above to return all captions  currently displayed in the remote browser as a vector.
+``` {r} 
+# find current captions
+getCaptionsNow <- function(vids) {
+    return(findVideosHTML(vids) %>% extractAllCaptions() %>% unlist())
+}
+```
+
+The following functions look at the video at the top of each page or the recorded reponses for each individual candidate and determine if we've recorded the entire video.
+
+``` {r}
+# check if a given candidate is finished
+candidateComplete <- function(candidate, maxGrabs, dta.q, cand.calls) {
+    # pull out the vector for this candidate's recorded captions
+    col <- dta.q[,candidate]
+    col <- col[col != ""]
+    
+    # ensure that there are captions recorded
+    if (length(col) == 0) {
+        # if there aren't, then there may be no video. Check to make sure
+        # we haven't surpassed the maximum number of checks for this candidate
+        if (cand.calls > maxGrabs) {
+            return(TRUE)
+        }
+        return(FALSE)
+    }
+    
+    # otherwise, save the first element
+    first <- col[1]
+    # and the indeces where the first element occurs
+    idx <- which(col == first)
+    
+    # check that either there is a repetition of the first caption after
+    # another one has been found (the first condition and the expected exit 
+    # condition), or that we've tried no more than the maximum allowable times
+    if (TRUE %in% (idx > 1:length(idx)) | length(idx) > maxGrabs) {
+        return(TRUE)
+    } else {
+        return(FALSE)
+    }
+}
+
+# check if the top video is finished
+headVideoComplete <- function(caps) {
+    col <- caps[caps != ""]
+    if (length(col) == 0) {
+        return(FALSE)
+    }
+    
+    first <- caps[1]
+    idx <- which(col == first)
+    if (TRUE %in% (idx > 1:length(idx))) {
+        return(TRUE)
+    } else {
+        return(FALSE)
+    }
+}
+```
+
+And, since some questions show a topper video, the function below pulls the captions for that video if we want them.
+
+``` {r} 
+# pulls captions from the topper video
+pullHeadVideoCaptions <- function(remDr) {
+    cap <- remDr$findElement(using = "css selector", "div.g-captions")
+    cap$getElementAttribute("outerHTML")[[1]] %>% read_html() %>% html_text()
+}
+```
+
+Now, here's the big one. This function is the catch all function to pull the transcripts for a given page.
+
+``` {r}
+# pulls transcripts for given page
+pullTranscripts <- function(url, maxGrabs = 50, remDr) {
+    # timer
+    start.time <- Sys.time()
+    
+    # launch page
+    remDr$navigate(url)
+    
+    
+    # pull candidate names and question
+    page.html <- remDr$getPageSource()[[1]] %>% read_html()
+    
+    cands <- extractCands(page.html) %>% 
+        tolower() %>% 
+        findLastWord()
+    
+    q.txt <- constructQuestion(page.html)
+    cat("\n", q.txt)
+    
+    # indexes
+    i <- 1 # indexes row in accumulator df or head video caps
+    # refresh to start videos over
+    remDr$refresh()
+    # pull each element to ease navigation
+    vids <- findVideoElements()
+    
+    # if we actually have videos
+    if (length(vids) != 0) {
+        
+        # create accumulator df
+        dta.q <- data.frame(matrix(nrow = 0, ncol = length(cands)))
+        colnames(dta.q) <- cands
+        
+        # set starting values
+        allDone <- FALSE
+        cand.calls <- 0
+        
+        j <- 1 # indexes candidate
+        cand <- cands[j]
+        
+        # navigate to first video
+        remDr$mouseMoveToLocation(webElement = vids[[1]])
+        
+        # transcribe
+        while(!allDone) {
+            # add line
+            dta.q[i,] <- getCaptionsNow(vids)
+            
+            # check candidate
+            if (candidateComplete(cand, maxGrabs, dta.q, cand.calls)) {
+                # if we've found everything for this candidate, update us and 
+                # continue
+                
+                cand.calls <- 0
+                # update
+                cat(paste("\n", cand, j, "/", length(cands)), "\n")
+                
+                # increment candidate index
+                j <- j + 1
+                
+                # check if all candidates are done
+                if (j > length(cands)) {
+                    allDone <- TRUE
+                } else {
+                    # navigate to next candidate and incrememnt candidate
+                    remDr$mouseMoveToLocation(webElement = vids[[j]])
+                    cand <- cands[j]
+                }
+            }
+            
+            # increment row and calls
+            cand.calls <- cand.calls + 1
+            i <- i + 1
+        }
+        
+        # compile transcripts - currently they're stored with a lot of 
+        # repetition. We don't want that, so we'll do some initial cleaning
+        # for each and then paste then non-duplicated elements together
+        out <- lapply(cands, function(cand) {
+            txt <- dta.q[,cand]
+            txt <- paste(txt[!duplicated(txt)], collapse = " ")
+            txt <- trimws(txt)
+            print(txt)
+            txt
+        })
+        
+        names(out) <- cands
+        out$question <- q.txt
+        out$raw <- dta.q
+        out$time <- Sys.time() - start.time
+        # returns this list storing all the info!
+        out
+    } else {
+        # for the questions where we only have one video for everyone,
+        # we'll just take all those transcripts together as one string and
+        # move on
+        caps <- c()
+        while(!headVideoComplete(caps)) {
+            caps[i] <- pullHeadVideoCaptions(remDr)
+            i <- i + 1
+        }
+        
+        list(raw = trimws(caps),
+             trimmed = trimws(caps[!duplicated(caps)]),
+             time = Sys.time() - start.time,
+             question = q.txt)
+    }
+}
+```
+
+Now, for the fun part. We'll open a remote driver in RSelenium and start actually automatically watching the videos! Note that at a certain point it will be helpful to sign into a New York Times account so that you don't eat into your monthly free article limit.
+
+``` {r}
+remDr <- newRemDr() # from myUtils
+# open page
+remDr$open()
+
+url <- paste0("https://www.nytimes.com/interactive/",
+              "2019/us/politics/2020-candidate-interviews.html")
+remDr$navigate(url)
+```
+
+Here's where you should make sure to sign into the Times!
+
+``` {r}
+# get all the links
+links <- getLinks(url)
+
+# initialize the transcript list
+transcripts <- list()
+
+# initialize i (just keeps track of where we are in the list of transcripts)
+i <- 1
+# for each link, pull the transcripts
+for (link in links) {
+    transcript.now <- pullTranscripts(url = link, 
+                                      maxGrabs = 50, 
+                                      remDr = remDr)
+    # save the raw data -- wouldn't want to lose all our work!
+    save(transcript.now, file = paste0("raw/q", i, ".Rdata"))
+    
+    # add to list
+    transcripts[[i]] <- transcript.now
+    
+    # update us
+    cat(paste("\n", i, "\n",
+              transcripts[[i]]$question, 
+              "\nDONE IN", 
+              transcripts[[i]]$time,
+              "minutes"))
+    # update i
+    i <- i + 1
+}
+
+remDr$close()
+```
+
