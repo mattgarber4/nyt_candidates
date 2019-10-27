@@ -1,1 +1,3 @@
 This repository contains the code for scraping the New York Times 2020 Democratic Candidate interviews ```Transcripts.Rmd```, as well as the code that compiles the transcipts, ```compile.R```, and finally the fully cleaned responses for each candidate for each question, ```final_nyt_candidate_answers.csv```.
+
+Additionally, for the interested reader, the ```.Rdata``` files containing the output of the scrape for each question are stored under ```/raw``` and the individually cleaned questions, in ```.csv``` format are contained in the ```/clean``` folder. Note however that the most clean version of the data, which is the one intended for analysis, is stored in ```final_nyt_candidate_answers.csv``` in the main directory.
