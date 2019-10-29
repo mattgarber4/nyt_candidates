@@ -8,7 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-In June 2019, the New York Times interviewed 18 Democratic presidential candidates and asked them the same set of 21 questions. The project was a major opportunity for those interested in the 2020 primary process to learn about the candidates in a controlled manor.
+In June 2019, the New York Times interviewed 21 Democratic presidential candidates and asked them the same set of 18 questions. The project was a major opportunity for those interested in the 2020 primary process to learn about the candidates in a controlled manor.
 
 Even more lucrative was the possibility for rigorous, quantitative analysis of the state of the primary race. Where else would such a large group of candidates be asked identical questions and have the opportunity to deliver unfiltered, unedited responses to the American people?
 
